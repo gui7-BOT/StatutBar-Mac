@@ -702,6 +702,21 @@ final class ControlItem {
             menu.addItem(item)
         }
 
+        // Recovery action: bring stuck or hidden items back into the menu bar
+        // without having to quit and relaunch the app.
+        menu.addItem(.separator())
+        let restoreItem = NSMenuItem(
+            title: String(localized: "Restore All Menu Bar Items"),
+            action: #selector(restoreAllItemsFromMenu),
+            keyEquivalent: ""
+        )
+        restoreItem.image = NSImage(
+            systemSymbolName: "arrow.uturn.backward.circle",
+            accessibilityDescription: "Restore All Menu Bar Items"
+        )
+        restoreItem.target = self
+        menu.addItem(restoreItem)
+
         // Profiles submenu.
         let profileManager = appState.profileManager
         if !profileManager.profiles.isEmpty {
@@ -781,6 +796,12 @@ final class ControlItem {
 
     @objc private func restartFromMenu() {
         appState?.restartSelf()
+    }
+
+    /// Recovers stuck menu bar items in-process, as a lighter-weight
+    /// alternative to quitting and relaunching the app.
+    @objc private func restoreAllItemsFromMenu() {
+        appState?.menuBarManager.recoverStuckMenuBarItems()
     }
 
     /// Shows the control item's menu.

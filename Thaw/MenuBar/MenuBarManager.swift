@@ -7,6 +7,7 @@
 //  Licensed under the GNU GPLv3
 
 import Combine
+import os
 import SwiftUI
 
 /// Manager for the state of the menu bar.
@@ -83,6 +84,14 @@ final class MenuBarManager: ObservableObject {
 
     /// The panel that contains the Thaw Bar interface.
     let iceBarPanel = IceBarPanel()
+
+    /// Guards against concurrent Thaw Bar item clicks. Two overlapping
+    /// temporarily-show/click pipelines corrupt the shared event-disable
+    /// counters and the temporarily-shown context list, which can wedge the
+    /// whole machinery until relaunch. While one click is being processed,
+    /// further clicks are ignored rather than queued — a dropped rapid
+    /// double-click is harmless; a wedged menu bar is not.
+    nonisolated let iceBarClickInFlight = OSAllocatedUnfairLock(initialState: false)
 
     /// The panel that contains the menu bar search interface.
     let searchPanel = MenuBarSearchPanel()
@@ -866,6 +875,33 @@ final class MenuBarManager: ObservableObject {
     /// Returns the control item for the menu bar section with the given name.
     func controlItem(withName name: MenuBarSection.Name) -> ControlItem? {
         section(withName: name)?.controlItem
+    }
+
+    // MARK: - Recovery
+
+    /// Recovers menu bar items that have become stuck and unusable, without
+    /// requiring the user to quit and relaunch the app.
+    ///
+    /// Clears wedged state in the item manager (leaked semaphore permits,
+    /// stranded temporarily-shown contexts, `waitForRelaunch` suppression),
+    /// forces the event manager back on in case its disable counter became
+    /// imbalanced, and reveals every section so all icons return to the menu
+    /// bar where they can be used and rearranged.
+    func recoverStuckMenuBarItems() {
+        diagLog.warning("Manual menu bar recovery triggered")
+        guard let appState else {
+            return
+        }
+        Task {
+            await appState.itemManager.recoverFromStuckState()
+            appState.hidEventManager.forceReenable()
+            // Reveal every section so all icons return to the menu bar.
+            for section in sections {
+                section.desiredState = .showSection
+                section.updateControlItemState(for: nil)
+            }
+            diagLog.info("Manual menu bar recovery completed")
+        }
     }
 
     // MARK: - Per-Item Hotkeys

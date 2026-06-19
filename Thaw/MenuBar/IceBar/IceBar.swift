@@ -755,11 +755,25 @@ private struct IceBarItemView: View {
             guard let itemManager, let menuBarManager else {
                 return
             }
+            // Serialize Thaw Bar clicks: if one is already being processed,
+            // ignore this one. Overlapping temporarilyShow/click pipelines
+            // corrupt shared event-disable counters and the temporarily-shown
+            // context list, which can wedge the menu bar until relaunch.
+            let acquired = menuBarManager.iceBarClickInFlight.withLock { inFlight -> Bool in
+                if inFlight { return false }
+                inFlight = true
+                return true
+            }
+            guard acquired else {
+                IceBarItemView.diagLog.debug("leftClick: ignored — another Thaw Bar click is in flight")
+                return
+            }
             let clickStartTime = Date.now
             IceBarItemView.diagLog.debug("leftClick: user clicked \(item.logString)")
             let panel = menuBarManager.iceBarPanel
             menuBarManager.section(withName: section)?.hide()
             Task {
+                defer { menuBarManager.iceBarClickInFlight.withLock { $0 = false } }
                 // Wait until the IceBar panel is fully closed before checking
                 // item visibility. Uses KVO on isVisible so we resume as soon
                 // as the panel hides rather than busy-polling.
@@ -785,9 +799,21 @@ private struct IceBarItemView: View {
             guard let itemManager, let menuBarManager else {
                 return
             }
+            // Serialize Thaw Bar clicks (see leftClickAction) to avoid
+            // overlapping pipelines wedging the menu bar.
+            let acquired = menuBarManager.iceBarClickInFlight.withLock { inFlight -> Bool in
+                if inFlight { return false }
+                inFlight = true
+                return true
+            }
+            guard acquired else {
+                IceBarItemView.diagLog.debug("rightClick: ignored — another Thaw Bar click is in flight")
+                return
+            }
             let panel = menuBarManager.iceBarPanel
             menuBarManager.section(withName: section)?.hide()
             Task {
+                defer { menuBarManager.iceBarClickInFlight.withLock { $0 = false } }
                 await panel.waitUntilClosed(timeout: .milliseconds(200))
                 if let liveItem = await liveOnScreenItem(matching: item, on: displayID) {
                     try await itemManager.click(item: liveItem, with: .right)

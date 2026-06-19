@@ -6896,6 +6896,50 @@ extension MenuBarItemManager {
 
         return failedMoves
     }
+
+    /// Recovers from a wedged state where temporarily-shown items have become
+    /// stuck and the event-posting machinery may be saturated, without requiring
+    /// the user to quit and relaunch the app.
+    ///
+    /// This is the in-process equivalent of the "quit and reopen" workaround:
+    /// it forgets any temporarily-shown contexts that never got rehidden, drops
+    /// every `waitForRelaunch` suppression sentinel so stranded items can be
+    /// moved again in the current session, resets the event semaphore in case a
+    /// permit leaked (which would otherwise block all subsequent move/click
+    /// operations), and restores any items parked off-screen at `x = -1`.
+    ///
+    /// - Returns: The number of blocked items that could not be restored.
+    @discardableResult
+    func recoverFromStuckState() async -> Int {
+        MenuBarItemManager.diagLog.warning("Manual recovery requested: clearing stuck menu bar item state")
+
+        // 1. Forget any temporarily-shown contexts that never got rehidden.
+        if !temporarilyShownItemContexts.isEmpty {
+            MenuBarItemManager.diagLog.info("Clearing \(self.temporarilyShownItemContexts.count) temporarily-shown context(s)")
+            temporarilyShownItemContexts.removeAll()
+        }
+
+        // 2. Drop waitForRelaunch sentinels so the rehide/relocate machinery is
+        //    allowed to touch these items again in the current session.
+        let stuckTags = pendingRelocations
+            .filter { $0.value.hasPrefix(Self.waitForRelaunchPrefix) }
+            .map(\.key)
+        if !stuckTags.isEmpty {
+            for tag in stuckTags {
+                pendingRelocations.removeValue(forKey: tag)
+                pendingReturnDestinations.removeValue(forKey: tag)
+            }
+            persistPendingRelocations()
+            MenuBarItemManager.diagLog.info("Cleared \(stuckTags.count) waitForRelaunch sentinel(s)")
+        }
+
+        // 3. Reset the event semaphore in case a permit leaked and wedged all
+        //    subsequent move/click operations.
+        await eventSemaphore.reset()
+
+        // 4. Bring any items parked off-screen at x = -1 back into view.
+        return await restoreBlockedItemsToVisible()
+    }
 }
 
 // MARK: - CGEventField Helpers
