@@ -789,6 +789,12 @@ private struct IceBarItemView: View {
                     let result = await itemManager.temporarilyShow(item: item, clickingWith: .left, on: displayID, fastPath: true)
                     let duration = Date.now.timeIntervalSince(clickStartTime)
                     IceBarItemView.diagLog.debug("leftClick: completed in \(Int(duration * 1000))ms (temp-show path, result=\(result))")
+                    if case .showFailed = result {
+                        // A failed show can leave the icon stranded off-screen
+                        // (x=-1). Restore any blocked item so a failed click
+                        // never leaves an icon invisible/unusable.
+                        _ = await itemManager.restoreBlockedItemsToVisible()
+                    }
                 }
             }
         }
@@ -820,6 +826,12 @@ private struct IceBarItemView: View {
                 } else {
                     let result = await itemManager.temporarilyShow(item: item, clickingWith: .right, on: displayID, fastPath: true)
                     IceBarItemView.diagLog.debug("rightClick: temp-show result=\(result)")
+                    if case .showFailed = result {
+                        // A failed show can leave the icon stranded off-screen
+                        // (x=-1). Restore any blocked item so a failed click
+                        // never leaves an icon invisible/unusable.
+                        _ = await itemManager.restoreBlockedItemsToVisible()
+                    }
                 }
             }
         }
