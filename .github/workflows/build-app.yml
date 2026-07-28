@@ -1,0 +1,54 @@
+name: Build App
+
+# Construit l'application (signature ad-hoc, sans certificat Apple Developer)
+# et la met à disposition en artefact téléchargeable dans l'onglet Actions.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.swift"
+      - "**/*.xcstrings"
+      - "Thaw.xcodeproj/**"
+      - ".github/workflows/build-app.yml"
+
+jobs:
+  build-app:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+
+      # Issues with other Xcode versions, so we need to specify the version explicitly
+      - run: sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
+
+      - name: Build (Release)
+        run: |
+          xcodebuild build \
+            -project Thaw.xcodeproj \
+            -scheme Thaw \
+            -configuration Release \
+            -derivedDataPath Build/ \
+            -destination 'platform=macOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Ad-hoc sign
+        run: |
+          APP="Build/Build/Products/Release/Thaw.app"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --verbose=2 "$APP"
+
+      - name: Zip app
+        run: |
+          cd Build/Build/Products/Release
+          ditto -c -k --sequesterRsrc --keepParent Thaw.app StatutBar-Thaw.zip
+
+      - name: Upload app
+        uses: actions/upload-artifact@v7
+        with:
+          name: StatutBar-Thaw-app
+          path: Build/Build/Products/Release/StatutBar-Thaw.zip
+          retention-days: 14
+          if-no-files-found: error
