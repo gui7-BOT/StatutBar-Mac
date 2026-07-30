@@ -600,7 +600,7 @@ final class HIDEventManager: ObservableObject {
         // due to a cancelled Task or unexpected error. Force recovery.
         if !isEnabled, disableCount > 0, let lastStop = lastStopTimestamp {
             let elapsed = ContinuousClock.now - lastStop
-            if elapsed > .seconds(30) {
+            if elapsed > Self.stuckDisabledRecoveryThreshold {
                 Self.diagLog.error(
                     """
                     Event manager stuck in disabled state for \
@@ -608,9 +608,7 @@ final class HIDEventManager: ObservableObject {
                     \(self.disableCount), forcing recovery
                     """
                 )
-                disableCount = 0
-                isEnabled = true
-                lastStopTimestamp = nil
+                forceReenableState()
             }
         }
 
@@ -631,6 +629,46 @@ final class HIDEventManager: ObservableObject {
            !mouseMovedTap.isEnabled
         {
             Self.diagLog.warning("mouseMovedTap was valid but not enabled, re-enabling")
+            mouseMovedTap.start()
+        }
+    }
+
+    /// How long the event manager may stay stuck in a disabled state before
+    /// the periodic health check forces it back on. Kept comfortably above the
+    /// worst-case duration of a legitimate move/click operation, but far below
+    /// the point where a user would give up and quit the app.
+    private static let stuckDisabledRecoveryThreshold: Duration = .seconds(8)
+
+    /// Resets the disable counters so monitors are considered enabled again.
+    /// Does not itself (re)start monitors — callers that need running monitors
+    /// should use ``forceReenable()`` instead.
+    private func forceReenableState() {
+        disableCount = 0
+        isEnabled = true
+        lastStopTimestamp = nil
+    }
+
+    /// Forces the event manager back into a fully enabled, running state,
+    /// recovering from a stuck `disableCount` imbalance without waiting for the
+    /// periodic health check. Safe to call at any time.
+    func forceReenable() {
+        if disableCount != 0 || !isEnabled {
+            Self.diagLog.warning(
+                "Forcing event manager re-enable (disableCount=\(self.disableCount), isEnabled=\(self.isEnabled))"
+            )
+        }
+        forceReenableState()
+
+        // Restart any NSEvent monitors and the mouse-moved tap that may have
+        // been left stopped by the imbalance.
+        for monitor in allMonitors {
+            monitor.ensureRunning()
+        }
+        if let appState,
+           needsMouseMovedTap(appState: appState),
+           mouseMovedTap.ensureValid(),
+           !mouseMovedTap.isEnabled
+        {
             mouseMovedTap.start()
         }
     }
